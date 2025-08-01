@@ -1,7 +1,6 @@
 # MLX implementation of text2video.py
 
 import gc
-import glob
 import logging
 import math
 import os
@@ -22,8 +21,7 @@ from .utils.fm_solvers import (
     retrieve_timesteps,
 )
 from .utils.fm_solvers_unipc import FlowUniPCMultistepScheduler
-from .wan_model_io import convert_wan_2_2_safetensors_to_mlx, convert_multiple_wan_2_2_safetensors_to_mlx, \
-    load_wan_2_2_from_safetensors
+from .wan_model_io import load_wan_2_2_from_safetensors
 
 
 class WanT2V:
@@ -108,37 +106,10 @@ class WanT2V:
         # Load low and high noise models
         logging.info(f"Creating WanModel from {checkpoint_dir}")
 
-        # Helper function to load model with automatic conversion
-        def load_model_with_conversion(checkpoint_dir, subfolder, config, param_dtype):
-            """Load model with automatic PyTorch to MLX conversion if needed."""
-
-            # Look for existing MLX files
-            mlx_single = os.path.join(checkpoint_dir, subfolder, "diffusion_pytorch_model_mlx.safetensors")
-            mlx_pattern = os.path.join(checkpoint_dir, subfolder, "diffusion_mlx_model*.safetensors")
-            mlx_files = glob.glob(mlx_pattern)
-
-            # If no MLX files, convert PyTorch files
-            if not os.path.exists(mlx_single) and not mlx_files:
-                pytorch_single = os.path.join(checkpoint_dir, subfolder, "diffusion_pytorch_model.safetensors")
-                pytorch_pattern = os.path.join(checkpoint_dir, subfolder, "diffusion_pytorch_model-*.safetensors")
-                pytorch_files = glob.glob(pytorch_pattern)
-
-                if os.path.exists(pytorch_single):
-                    logging.info(f"Converting PyTorch model to MLX: {pytorch_single}")
-                    convert_wan_2_2_safetensors_to_mlx(
-                        pytorch_single, 
-                        mlx_single,
-                        float16=(param_dtype == mx.float16)
-                    )
-                elif pytorch_files:
-                    logging.info(f"Converting {len(pytorch_files)} PyTorch files to MLX")
-                    convert_multiple_wan_2_2_safetensors_to_mlx(
-                        os.path.join(checkpoint_dir, subfolder),
-                        float16=(param_dtype == mx.float16)
-                    )
-                    mlx_files = glob.glob(mlx_pattern)  # Update file list
-                else:
-                    raise FileNotFoundError(f"No model files found in {os.path.join(checkpoint_dir, subfolder)}")
+        # Helper function to load model
+        def load_model(checkpoint_dir, subfolder, config, param_dtype):
+            # Look for existing safetensors single file
+            safetensors_single = os.path.join(checkpoint_dir, subfolder, "diffusion_pytorch_model.safetensors")
 
             # Create model
             model = WanModel(
@@ -160,15 +131,15 @@ class WanT2V:
             )
 
             # Load weights
-            if os.path.exists(mlx_single):
-                logging.info(f"Loading single MLX file: {mlx_single}")
-                model = load_wan_2_2_from_safetensors(mlx_single, model, float16=(param_dtype == mx.float16))
+            if os.path.exists(safetensors_single):
+                logging.info(f"Loading single safetensors file: {safetensors_single}")
+                model = load_wan_2_2_from_safetensors(safetensors_single, model, dtype=param_dtype)
             else:
-                logging.info(f"Loading multiple MLX files from: {os.path.join(checkpoint_dir, subfolder)}")
+                logging.info(f"Loading multiple safetensors files from: {os.path.join(checkpoint_dir, subfolder)}")
                 model = load_wan_2_2_from_safetensors(
-                    os.path.join(checkpoint_dir, subfolder), 
-                    model, 
-                    float16=(param_dtype == mx.float16)
+                    os.path.join(checkpoint_dir, subfolder),
+                    model,
+                    dtype=param_dtype
                 )
 
             return model
@@ -176,7 +147,7 @@ class WanT2V:
         # Load both models
         logging.info(f"Creating WanModel from {checkpoint_dir}")
         logging.info("Loading low noise model")
-        self.low_noise_model = load_model_with_conversion(
+        self.low_noise_model = load_model(
             checkpoint_dir, 
             config.low_noise_checkpoint, 
             self.config, 
@@ -185,7 +156,7 @@ class WanT2V:
         self.low_noise_model = self._configure_model(self.low_noise_model, convert_model_dtype)
 
         logging.info("Loading high noise model")
-        self.high_noise_model = load_model_with_conversion(
+        self.high_noise_model = load_model(
             checkpoint_dir, 
             config.high_noise_checkpoint, 
             self.config, 
