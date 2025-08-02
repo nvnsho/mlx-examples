@@ -1,36 +1,9 @@
 import mlx.core as mx
-import numpy as np
-import torch
-from safetensors import safe_open
 
 
-def convert_pytorch_to_mlx(pytorch_path: str, output_path: str, float16: bool = False):
-    """
-    Convert PyTorch VAE weights to MLX format with correct mapping.
-    """
-    print(f"Converting {pytorch_path} -> {output_path}")
-    dtype = mx.float16 if float16 else mx.float32
-
-    # Load PyTorch weights
-    if pytorch_path.endswith('.safetensors'):
-        weights = {}
-        with safe_open(pytorch_path, framework="pt", device="cpu") as f:
-            for key in f.keys():
-                tensor = f.get_tensor(key)
-                if tensor.dtype == torch.bfloat16:
-                    tensor = tensor.float()
-                weights[key] = tensor.numpy()
-    else:
-        checkpoint = torch.load(pytorch_path, map_location='cpu')
-        weights = {}
-        state_dict = checkpoint if isinstance(checkpoint, dict) and 'state_dict' not in checkpoint else checkpoint.get('state_dict', checkpoint)
-        for key, tensor in state_dict.items():
-            if tensor.dtype == torch.bfloat16:
-                tensor = tensor.float()
-            weights[key] = tensor.numpy()
-
+def sanitize(weights):
     # Convert weights
-    mlx_weights = {}
+    new_weights = {}
 
     for key, value in weights.items():
         # Skip these
@@ -38,14 +11,14 @@ def convert_pytorch_to_mlx(pytorch_path: str, output_path: str, float16: bool = 
             continue
 
         # Convert weight formats
-        if value.ndim == 5 and "weight" in key:  # Conv3d weights
+        elif value.ndim == 5 and "weight" in key:  # Conv3d weights
             # PyTorch: (out_channels, in_channels, D, H, W)
             # MLX: (out_channels, D, H, W, in_channels)
-            value = np.transpose(value, (0, 2, 3, 4, 1))
+            value = mx.transpose(value, (0, 2, 3, 4, 1))
         elif value.ndim == 4 and "weight" in key:  # Conv2d weights
             # PyTorch: (out_channels, in_channels, H, W)
             # MLX Conv2d expects: (out_channels, H, W, in_channels)
-            value = np.transpose(value, (0, 2, 3, 1))
+            value = mx.transpose(value, (0, 2, 3, 1))
         elif value.ndim == 1 and "bias" in key:  # Conv biases
             # Keep as is - MLX uses same format
             pass
@@ -123,11 +96,11 @@ def convert_pytorch_to_mlx(pytorch_path: str, output_path: str, float16: bool = 
         # In the conversion script
         if "gamma" in new_key:
             # Squeeze gamma from (C, 1, 1) or (C, 1, 1, 1) to just (C,)
-            value = np.squeeze(value)  # This removes all dimensions of size 1
+            value = mx.squeeze(value)  # This removes all dimensions of size 1
             # Result will always be 1D array of shape (C,)
 
-        # Add to MLX weights
-        mlx_weights[new_key] = mx.array(value).astype(dtype)
+        # Add to new weights
+        new_weights[new_key] = value
 
     # Verify critical layers are present
     critical_prefixes = [
@@ -136,25 +109,8 @@ def convert_pytorch_to_mlx(pytorch_path: str, output_path: str, float16: bool = 
     ]
 
     for prefix in critical_prefixes:
-        found = any(k.startswith(prefix) for k in mlx_weights.keys())
+        found = any(k.startswith(prefix) for k in new_weights.keys())
         if not found:
             print(f"WARNING: No weights found for {prefix}")
 
-    print(f"Converted {len(mlx_weights)} parameters")
-
-    # Print a few example keys for verification
-    print("\nExample converted keys:")
-    for i, key in enumerate(sorted(mlx_weights.keys())[:10]):
-        print(f"  {key}")
-
-    # Save
-    if output_path.endswith('.safetensors'):
-        mx.save_safetensors(output_path, mlx_weights)
-    else:
-        mx.savez(output_path, **mlx_weights)
-
-    print(f"\nSaved to {output_path}")
-    print("\nAll converted keys:")
-    for key in sorted(mlx_weights.keys()):
-        print(f"  {key}: {mlx_weights[key].shape}")
-    return mlx_weights
+    return new_weights

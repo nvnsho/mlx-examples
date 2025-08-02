@@ -94,19 +94,20 @@ class WanT2V:
         vae_path = os.path.join(checkpoint_dir, config.vae_checkpoint)
         if not os.path.exists(vae_path):
             # Check for PyTorch VAE file to convert
-            pth_vae_path = vae_path.replace('_mlx.safetensors', '.pth')
+            pth_vae_path = vae_path.replace('.safetensors', '.pth')
             if not os.path.exists(pth_vae_path):
                 # Try alternative naming
                 pth_vae_path = os.path.join(checkpoint_dir, 'Wan2.1_VAE.pth')
 
             if os.path.exists(pth_vae_path):
-                logging.info(f"Converting VAE PyTorch model to MLX: {pth_vae_path}")
-                from .vae_model_io import convert_pytorch_to_mlx
-                convert_pytorch_to_mlx(pth_vae_path, vae_path, float16=(self.param_dtype == mx.float16))
+                logging.info(f"Converting VAE PyTorch model to safetensors: {pth_vae_path}")
+                from .model_converter import convert_pickle_to_safetensors
+                convert_pickle_to_safetensors(pth_vae_path, vae_path)
             else:
                 raise FileNotFoundError(f"VAE checkpoint not found: {vae_path} or {pth_vae_path}")
 
         logging.info("Loading VAE...")
+        # self.vae = Wan2_1_VAE(vae_pth=vae_path, dtype=self.param_dtype)
         self.vae = Wan2_1_VAE(vae_pth=vae_path)
 
         # Load low and high noise models

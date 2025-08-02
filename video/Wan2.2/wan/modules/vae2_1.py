@@ -5,6 +5,8 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_unflatten
 
+from ..vae_model_io import sanitize
+
 __all__ = [
     'Wan2_1_VAE',
 ]
@@ -602,7 +604,7 @@ class WanVAE_(nn.Module):
         self._enc_feat_map = [None] * self._enc_conv_num
 
 
-def _video_vae(pretrained_path=None, z_dim=None, **kwargs):
+def _video_vae(pretrained_path=None, z_dim=None, dtype=mx.float32, **kwargs):
     # params
     cfg = dict(
         dim=96,
@@ -621,6 +623,12 @@ def _video_vae(pretrained_path=None, z_dim=None, **kwargs):
     if pretrained_path:
         logging.info(f'loading {pretrained_path}')
         weights = mx.load(pretrained_path)
+
+        for key, weight in weights.items():
+            if weight.dtype != dtype and mx.issubdtype(weight.dtype, mx.floating):
+                weights[key] = weight.astype(dtype)
+
+        weights = sanitize(weights)
         model.update(tree_unflatten(list(weights.items())))
 
     return model
@@ -650,6 +658,7 @@ class Wan2_1_VAE:
         self.model = _video_vae(
             pretrained_path=vae_pth,
             z_dim=z_dim,
+            dtype=dtype
         )
 
     def encode(self, videos):
