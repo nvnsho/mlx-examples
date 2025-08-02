@@ -2,11 +2,10 @@ import math
 from typing import List, Optional, Tuple, Union
 
 import mlx.core as mx
-import numpy as np
 
 
 def get_sampling_sigmas(sampling_steps, shift):
-    sigma = np.linspace(1, 0, sampling_steps + 1)[:sampling_steps]
+    sigma = mx.linspace(1, 0, sampling_steps + 1)[:sampling_steps]
     sigma = (shift * sigma / (1 + (shift - 1) * sigma))
     return sigma
 
@@ -106,7 +105,7 @@ class FlowDPMSolverMultistepScheduler:
 
         # Initialize scheduling
         self.num_inference_steps = None
-        alphas = np.linspace(1, 1 / num_train_timesteps, num_train_timesteps)[::-1].copy()
+        alphas = mx.linspace(1, 1 / num_train_timesteps, num_train_timesteps)[::-1]
         sigmas = 1.0 - alphas
         sigmas = mx.array(sigmas, dtype=mx.float32)
 
@@ -150,7 +149,7 @@ class FlowDPMSolverMultistepScheduler:
             )
 
         if sigmas is None:
-            sigmas = np.linspace(self.sigma_max, self.sigma_min, num_inference_steps + 1).copy()[:-1]
+            sigmas = mx.linspace(self.sigma_max, self.sigma_min, num_inference_steps + 1)[:-1]
 
         if self.config['use_dynamic_shifting']:
             sigmas = self.time_shift(mu, 1.0, sigmas)
@@ -169,7 +168,7 @@ class FlowDPMSolverMultistepScheduler:
             )
 
         timesteps = sigmas * self.config['num_train_timesteps']
-        sigmas = np.concatenate([sigmas, [sigma_last]]).astype(np.float32)
+        sigmas = mx.concatenate([sigmas, mx.array([sigma_last])]).astype(mx.float32)
 
         self.sigmas = mx.array(sigmas)
         self.timesteps = mx.array(timesteps, dtype=mx.int64)
@@ -188,7 +187,7 @@ class FlowDPMSolverMultistepScheduler:
         batch_size, channels, *remaining_dims = sample.shape
 
         # Flatten sample for quantile calculation
-        sample_flat = sample.reshape(batch_size, channels * np.prod(remaining_dims))
+        sample_flat = sample.reshape(batch_size, channels * mx.prod(remaining_dims))
 
         abs_sample = mx.abs(sample_flat)
 
