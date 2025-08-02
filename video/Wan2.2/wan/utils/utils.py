@@ -26,35 +26,35 @@ def make_grid(tensor, nrow=8, normalize=True, value_range=(-1, 1)):
     """MLX equivalent of torchvision.utils.make_grid"""
     # tensor shape: (batch, channels, height, width)
     batch_size, channels, height, width = tensor.shape
-    
+
     # Calculate grid dimensions
     ncol = nrow
     nrow_actual = (batch_size + ncol - 1) // ncol
-    
+
     # Create grid
     grid_height = height * nrow_actual + (nrow_actual - 1) * 2  # 2 pixel padding
     grid_width = width * ncol + (ncol - 1) * 2
-    
+
     # Initialize grid with zeros
     grid = mx.zeros((channels, grid_height, grid_width))
-    
+
     # Fill grid
     for idx in range(batch_size):
         row = idx // ncol
         col = idx % ncol
-        
+
         y_start = row * (height + 2)
         y_end = y_start + height
         x_start = col * (width + 2)
         x_end = x_start + width
-        
+
         img = tensor[idx]
         if normalize:
             # Normalize to [0, 1]
             img = (img - value_range[0]) / (value_range[1] - value_range[0])
-        
+
         grid[:, y_start:y_end, x_start:x_end] = img
-    
+
     return grid
 
 
@@ -73,7 +73,7 @@ def save_video(tensor,
     try:
         # preprocess
         tensor = mx.clip(tensor, value_range[0], value_range[1])
-        
+
         # tensor shape: (batch, channels, frames, height, width)
         # Process each frame
         frames = []
@@ -81,11 +81,11 @@ def save_video(tensor,
             frame = tensor[:, :, frame_idx, :, :]  # (batch, channels, height, width)
             grid = make_grid(frame, nrow=nrow, normalize=normalize, value_range=value_range)
             frames.append(grid)
-        
+
         # Stack frames and convert to (frames, height, width, channels)
         tensor = mx.stack(frames, axis=0)  # (frames, channels, height, width)
         tensor = mx.transpose(tensor, [0, 2, 3, 1])  # (frames, height, width, channels)
-        
+
         # Convert to uint8
         tensor = (tensor * 255).astype(mx.uint8)
         tensor_np = np.array(tensor)
@@ -112,14 +112,14 @@ def save_image(tensor, save_file, nrow=8, normalize=True, value_range=(-1, 1)):
     try:
         # Clip values
         tensor = mx.clip(tensor, value_range[0], value_range[1])
-        
+
         # Make grid
         grid = make_grid(tensor, nrow=nrow, normalize=normalize, value_range=value_range)
-        
+
         # Convert to (height, width, channels) and uint8
         grid = mx.transpose(grid, [1, 2, 0])  # (height, width, channels)
         grid = (grid * 255).astype(mx.uint8)
-        
+
         # Save using imageio
         imageio.imwrite(save_file, np.array(grid))
         return save_file
@@ -157,13 +157,13 @@ def str2bool(v):
 def masks_like(tensor, zero=False, generator=None, p=0.2):
     """
     Generate masks similar to input tensors.
-    
+
     Args:
         tensor: List of MLX arrays
         zero: Whether to apply zero masking
         generator: Random generator (for MLX, we use mx.random.seed instead)
         p: Probability for random masking
-    
+
     Returns:
         Tuple of two lists of masks
     """
@@ -197,14 +197,14 @@ def masks_like(tensor, zero=False, generator=None, p=0.2):
 def best_output_size(w, h, dw, dh, expected_area):
     """
     Calculate the best output size given constraints.
-    
+
     Args:
         w: Width
         h: Height
         dw: Width divisor
         dh: Height divisor
         expected_area: Target area
-    
+
     Returns:
         Tuple of (output_width, output_height)
     """

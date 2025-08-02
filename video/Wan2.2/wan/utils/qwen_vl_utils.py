@@ -15,8 +15,8 @@ from io import BytesIO
 import requests
 import torch
 import torchvision
-from packaging import version
 from PIL import Image
+from packaging import version
 from torchvision import io, transforms
 from torchvision.transforms import InterpolationMode
 
@@ -343,8 +343,7 @@ def extract_vision_info(
 
 def process_vision_info(
     conversations: list[dict] | list[list[dict]],
-) -> tuple[list[Image.Image] | None, list[torch.Tensor | list[Image.Image]] |
-           None]:
+) -> tuple[list[Image.Image] | None, list[torch.Tensor | list[Image.Image]] | None]:
     vision_infos = extract_vision_info(conversations)
     ## Read images or videos
     image_inputs = []
