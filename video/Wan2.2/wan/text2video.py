@@ -50,24 +50,8 @@ class WanT2V:
         self.patch_size = config.patch_size
         self.num_train_timesteps = config.num_train_timesteps
         self.boundary = config.boundary
-        # Convert PyTorch dtype to MLX dtype
-        if str(config.param_dtype) == 'torch.bfloat16':
-            self.param_dtype = mx.bfloat16
-        elif str(config.param_dtype) == 'torch.float16':
-            self.param_dtype = mx.float16
-        elif str(config.param_dtype) == 'torch.float32':
-            self.param_dtype = mx.float32
-        else:
-            self.param_dtype = mx.float32  # default
-
-        if str(config.t5_dtype) == 'torch.bfloat16':
-            self.t5_dtype = mx.bfloat16
-        elif str(config.t5_dtype) == 'torch.float16':
-            self.t5_dtype = mx.float16
-        elif str(config.t5_dtype) == 'torch.float32':
-            self.t5_dtype = mx.float32
-        else:
-            self.t5_dtype = mx.bfloat16  # default
+        self.param_dtype = config.param_dtype
+        self.t5_dtype = config.t5_dtype
 
         # Initialize T5 text encoder
         print(f"checkpoint_dir is: {checkpoint_dir}")
