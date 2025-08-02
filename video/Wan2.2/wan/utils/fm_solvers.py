@@ -438,10 +438,12 @@ class FlowDPMSolverMultistepScheduler:
         if schedule_timesteps is None:
             schedule_timesteps = self.timesteps
 
-        indices = mx.where(schedule_timesteps == timestep)[0]
+        arr = schedule_timesteps.tolist()
+        indices = [i for i, v in enumerate(arr) if v == timestep]
+
         pos = 1 if len(indices) > 1 else 0
 
-        return int(indices[pos])
+        return indices[pos]
 
     def _init_step_index(self, timestep):
         """Initialize the step_index counter for the scheduler."""
