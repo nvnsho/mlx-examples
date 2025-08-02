@@ -2,24 +2,21 @@
 import argparse
 import logging
 import os
+import random
 import sys
 import warnings
 from datetime import datetime
 
-warnings.filterwarnings('ignore')
-
-import random
-import mlx.core as mx
-import mlx.nn as nn
 from PIL import Image
-import numpy as np
-
-# Note: MLX doesn't have built-in distributed training support like PyTorch
-# For distributed training, you would need to implement custom logic or use MPI
 
 import wan  # Assuming wan has been converted to MLX
 from wan.configs import MAX_AREA_CONFIGS, SIZE_CONFIGS, SUPPORTED_SIZES, WAN_CONFIGS
 from wan.utils.utils import save_video, str2bool
+
+# Note: MLX doesn't have built-in distributed training support like PyTorch
+# For distributed training, you would need to implement custom logic or use MPI
+
+warnings.filterwarnings('ignore')
 
 EXAMPLE_PROMPT = {
     "t2v-A14B": {
@@ -220,25 +217,25 @@ def generate(args):
     rank = 0
     world_size = 1
     local_rank = 0
-    
+
     # Check for distributed execution environment variables
     # Note: Actual distributed implementation would require custom logic
     if "RANK" in os.environ:
         logging.warning("MLX doesn't have built-in distributed training. Running on single device.")
-    
+
     _init_logging(rank)
 
     if args.offload_model is None:
         args.offload_model = False
         logging.info(
             f"offload_model is not specified, set to {args.offload_model}.")
-    
+
     # MLX doesn't support FSDP or distributed training out of the box
     if args.t5_fsdp or args.dit_fsdp:
         logging.warning("FSDP is not supported in MLX. Ignoring FSDP flags.")
         args.t5_fsdp = False
         args.dit_fsdp = False
-    
+
     if args.ulysses_size > 1:
         logging.warning("Sequence parallel is not supported in MLX single-device mode. Setting ulysses_size to 1.")
         args.ulysses_size = 1
@@ -369,7 +366,7 @@ def generate(args):
         args.save_file = f"{args.task}_{args.size.replace('*','x') if sys.platform=='win32' else args.size}_{args.ulysses_size}_{formatted_prompt}_{formatted_time}" + suffix
 
     logging.info(f"Saving generated video to {args.save_file}")
-        
+
     # Don't convert to numpy - keep as MLX array
     save_video(
         tensor=video[None],  # Just add batch dimension, keep as MLX array

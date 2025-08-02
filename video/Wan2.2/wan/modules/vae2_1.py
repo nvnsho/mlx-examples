@@ -1,12 +1,11 @@
 # MLX implementation of vae2_1.py
 import logging
-from typing import Optional, List, Tuple
 
 import mlx.core as mx
 import mlx.nn as nn
-import numpy as np
-
 from mlx.utils import tree_unflatten
+
+from ..vae_model_io import sanitize
 
 __all__ = [
     'Wan2_1_VAE',
@@ -35,12 +34,12 @@ class CausalConv3d(nn.Conv3d):
         if cache_x is not None and self._padding[4] > 0:
             x = mx.concatenate([cache_x, x], axis=1)  # Concat along time axis
             padding[4] -= cache_x.shape[1]
-        
+
         # Pad in BTHWC format
         pad_width = [(0, 0), (padding[4], padding[5]), (padding[2], padding[3]), 
                      (padding[0], padding[1]), (0, 0)]
         x = mx.pad(x, pad_width)
-        
+
         result = super().__call__(x)
         return result
 
@@ -74,10 +73,10 @@ class Upsample(nn.Module):
 
     def __call__(self, x):
         scale_h, scale_w = self.scale_factor
-        
+
         out = mx.repeat(x, int(scale_h), axis=1)  # Repeat along H dimension
         out = mx.repeat(out, int(scale_w), axis=2) # Repeat along W dimension
-        
+
         return out
 
 class AsymmetricPad(nn.Module):
@@ -124,17 +123,17 @@ class Resample(nn.Module):
             pad_layer = AsymmetricPad(pad_width=((0, 0), (0, 1), (0, 1), (0, 0)))
             conv_layer = nn.Conv2d(dim, dim, 3, stride=(2, 2), padding=0)
             self.resample = nn.Sequential(pad_layer, conv_layer)
-            
+
             self.time_conv = CausalConv3d(
                 dim, dim, (3, 1, 1), stride=(2, 1, 1), padding=(0, 0, 0))
-        
+
         else:
             self.resample = nn.Identity()
 
     def __call__(self, x, feat_cache=None, feat_idx=[0]):
         # The __call__ method logic remains unchanged from your original code
         b, t, h, w, c = x.shape
-        
+
         if self.mode == 'upsample3d':
             if feat_cache is not None:
                 idx = feat_idx[0]
@@ -151,7 +150,7 @@ class Resample(nn.Module):
                         cache_x = mx.concatenate([
                             mx.zeros_like(cache_x), cache_x
                         ], axis=1)
-                    
+
                     if feat_cache[idx] == 'Rep':
                         x = self.time_conv(x)
                     else:
@@ -162,10 +161,10 @@ class Resample(nn.Module):
                     x = x.reshape(b, t, h, w, 2, c)
                     x = mx.stack([x[:, :, :, :, 0, :], x[:, :, :, :, 1, :]], axis=2)
                     x = x.reshape(b, t * 2, h, w, c)
-        
+
         t = x.shape[1]
         x = x.reshape(b * t, h, w, c)
-        
+
         x = self.resample(x)
 
         _, h_new, w_new, c_new = x.shape
@@ -183,7 +182,7 @@ class Resample(nn.Module):
                         mx.concatenate([feat_cache[idx][:, -1:, :, :, :], x], axis=1))
                     feat_cache[idx] = cache_x
                     feat_idx[0] += 1
-        
+
         return x
 
 
@@ -204,13 +203,13 @@ class ResidualBlock(nn.Module):
             nn.Dropout(dropout) if dropout > 0 else nn.Identity(),
             CausalConv3d(out_dim, out_dim, 3, padding=1)
         )
-        
+
         self.shortcut = CausalConv3d(in_dim, out_dim, 1) \
             if in_dim != out_dim else nn.Identity()
 
     def __call__(self, x, feat_cache=None, feat_idx=[0]):
         h = self.shortcut(x)
-        
+
         for i, layer in enumerate(self.residual.layers):
             if isinstance(layer, CausalConv3d) and feat_cache is not None:
                 idx = feat_idx[0]
@@ -254,7 +253,7 @@ class AttentionBlock(nn.Module):
         qkv = self.to_qkv(x)  # Output: (b*t, h, w, 3*c)
         qkv = qkv.reshape(b * t, h * w, 3 * c)
         q, k, v = mx.split(qkv, 3, axis=-1)
-        
+
         # Reshape for attention
         q = q.reshape(b * t, h * w, c)
         k = k.reshape(b * t, h * w, c)
@@ -535,10 +534,10 @@ class WanVAE_(nn.Module):
                     feat_cache=self._enc_feat_map,
                     feat_idx=self._enc_conv_idx)
                 out = mx.concatenate([out, out_], axis=1)
-        
+
         z = self.conv1(out)
         mu, log_var = mx.split(z, 2, axis=-1)  # Split along channel dimension
-        
+
         if isinstance(scale[0], mx.array):
             # Reshape scale for broadcasting in BTHWC format
             scale_mean = scale[0].reshape(1, 1, 1, 1, self.z_dim)
@@ -605,7 +604,7 @@ class WanVAE_(nn.Module):
         self._enc_feat_map = [None] * self._enc_conv_num
 
 
-def _video_vae(pretrained_path=None, z_dim=None, **kwargs):
+def _video_vae(pretrained_path=None, z_dim=None, dtype=mx.float32, **kwargs):
     # params
     cfg = dict(
         dim=96,
@@ -624,6 +623,12 @@ def _video_vae(pretrained_path=None, z_dim=None, **kwargs):
     if pretrained_path:
         logging.info(f'loading {pretrained_path}')
         weights = mx.load(pretrained_path)
+
+        for key, weight in weights.items():
+            if weight.dtype != dtype and mx.issubdtype(weight.dtype, mx.floating):
+                weights[key] = weight.astype(dtype)
+
+        weights = sanitize(weights)
         model.update(tree_unflatten(list(weights.items())))
 
     return model
@@ -653,6 +658,7 @@ class Wan2_1_VAE:
         self.model = _video_vae(
             pretrained_path=vae_pth,
             z_dim=z_dim,
+            dtype=dtype
         )
 
     def encode(self, videos):
@@ -665,16 +671,16 @@ class Wan2_1_VAE:
             # Convert CTHW -> BTHWC
             x = mx.expand_dims(video, axis=0)  # Add batch dimension
             x = x.transpose(0, 2, 3, 4, 1)  # BCTHW -> BTHWC
-            
+
             # Encode
             z = self.model.encode(x, self.scale)[0]  # Get mu only
-            
+
             # Convert back BTHWC -> CTHW and remove batch dimension
             z = z.transpose(0, 4, 1, 2, 3)  # BTHWC -> BCTHW
             z = z.squeeze(0)  # Remove batch dimension -> CTHW
-            
+
             encoded.append(z.astype(mx.float32))
-        
+
         return encoded
 
     def decode(self, zs):
@@ -687,17 +693,17 @@ class Wan2_1_VAE:
             # Convert CTHW -> BTHWC
             x = mx.expand_dims(z, axis=0)  # Add batch dimension
             x = x.transpose(0, 2, 3, 4, 1)  # BCTHW -> BTHWC
-           
+
             # Decode
             x = self.model.decode(x, self.scale)
-            
+
             # Convert back BTHWC -> CTHW and remove batch dimension
             x = x.transpose(0, 4, 1, 2, 3)  # BTHWC -> BCTHW
             x = x.squeeze(0)  # Remove batch dimension -> CTHW
-            
+
             # Clamp values
             x = mx.clip(x, -1, 1)
-            
+
             decoded.append(x.astype(mx.float32))
-        
+
         return decoded

@@ -1,5 +1,4 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
-import copy
 import os
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'

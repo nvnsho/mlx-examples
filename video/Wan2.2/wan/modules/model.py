@@ -4,7 +4,6 @@ from typing import List, Tuple, Optional
 
 import mlx.core as mx
 import mlx.nn as nn
-import numpy as np
 
 __all__ = ['WanModel']
 
@@ -52,17 +51,17 @@ def rope_apply(x, grid_sizes, freqs):
 
         # reshape x_i to complex representation
         x_i = x[i, :seq_len].reshape(seq_len, n, c, 2)
-        
+
         # precompute frequency multipliers for each dimension
         freqs_f = freqs_splits[0][:f].reshape(f, 1, 1, -1, 2)
         freqs_f = mx.tile(freqs_f, (1, h, w, 1, 1)).reshape(f * h * w, -1, 2)
-        
+
         freqs_h = freqs_splits[1][:h].reshape(1, h, 1, -1, 2) 
         freqs_h = mx.tile(freqs_h, (f, 1, w, 1, 1)).reshape(f * h * w, -1, 2)
-        
+
         freqs_w = freqs_splits[2][:w].reshape(1, 1, w, -1, 2)
         freqs_w = mx.tile(freqs_w, (f, h, 1, 1, 1)).reshape(f * h * w, -1, 2)
-        
+
         # Concatenate frequency components
         freqs_i = mx.concatenate([freqs_f, freqs_h, freqs_w], axis=1)
         freqs_i = freqs_i[:seq_len].reshape(seq_len, 1, c, 2)
@@ -72,18 +71,18 @@ def rope_apply(x, grid_sizes, freqs):
         x_imag = x_i[..., 1]
         freqs_real = freqs_i[..., 0]
         freqs_imag = freqs_i[..., 1]
-        
+
         out_real = x_real * freqs_real - x_imag * freqs_imag
         out_imag = x_real * freqs_imag + x_imag * freqs_real
-        
+
         x_i = mx.stack([out_real, out_imag], axis=-1).reshape(seq_len, n, -1)
-        
+
         # Handle remaining sequence
         if x.shape[1] > seq_len:
             x_i = mx.concatenate([x_i, x[i, seq_len:]], axis=0)
 
         output.append(x_i)
-    
+
     return mx.stack(output)
 
 
@@ -136,29 +135,29 @@ def mlx_attention(
     # Get shapes
     b, lq, n, d = q.shape
     _, lk, _, _ = k.shape
-    
+
     # Scale queries if needed
     if q_scale is not None:
         q = q * q_scale
-    
+
     # Compute attention scores
     q = q.transpose(0, 2, 1, 3)  # [b, n, lq, d]
     k = k.transpose(0, 2, 1, 3)  # [b, n, lk, d]
     v = v.transpose(0, 2, 1, 3)  # [b, n, lk, d]
-    
+
     # Compute attention scores
     scores = mx.matmul(q, k.transpose(0, 1, 3, 2))  # [b, n, lq, lk]
-    
+
     # Apply softmax scale if provided
     if softmax_scale is not None:
         scores = scores * softmax_scale
     else:
         # Default scaling by sqrt(d)
         scores = scores / mx.sqrt(mx.array(d, dtype=scores.dtype))
-    
+
     # Create attention mask
     attn_mask = None
-    
+
     # Apply window size masking if specified
     if window_size != (-1, -1):
         left_window, right_window = window_size
@@ -168,7 +167,7 @@ def mlx_attention(
             end = min(lk, i + right_window + 1)
             window_mask[i, start:end] = 1
         attn_mask = window_mask
-    
+
     # Apply causal masking if needed
     if causal:
         causal_mask = mx.tril(mx.ones((lq, lk)), k=0)
@@ -176,12 +175,12 @@ def mlx_attention(
             attn_mask = causal_mask
         else:
             attn_mask = mx.logical_and(attn_mask, causal_mask)
-    
+
     # Apply attention mask if present
     if attn_mask is not None:
         attn_mask = attn_mask.astype(scores.dtype)
         scores = scores * attn_mask + (1 - attn_mask) * -1e4
-    
+
     # Apply attention mask if lengths are provided
     if q_lens is not None or k_lens is not None:
         if q_lens is not None:
@@ -192,22 +191,22 @@ def mlx_attention(
             mask = mx.arange(lk)[None, :] < k_lens[:, None]
             mask = mask.astype(scores.dtype)
             scores = scores * mask[:, None, None, :] + (1 - mask[:, None, None, :]) * -1e4
-    
+
     # Apply softmax
     max_scores = mx.max(scores, axis=-1, keepdims=True)
     scores = scores - max_scores
     exp_scores = mx.exp(scores)
     sum_exp = mx.sum(exp_scores, axis=-1, keepdims=True)
     attn = exp_scores / (sum_exp + 1e-6)
-    
+
     # Apply dropout if needed
     if dropout_p > 0 and not deterministic:
         raise NotImplementedError("Dropout not implemented in MLX version")
-    
+
     # Compute output
     out = mx.matmul(attn, v)  # [b, n, lq, d]
     out = out.transpose(0, 2, 1, 3)  # [b, lq, n, d]
-    
+
     return out
 
 class WanSelfAttention(nn.Module):
@@ -356,7 +355,7 @@ class WanAttentionBlock(nn.Module):
         y = self.ffn(
             self.norm2(x) * (1 + mx.squeeze(e[4], axis=2)) + mx.squeeze(e[3], axis=2))
         x = x + y * mx.squeeze(e[5], axis=2)
-        
+
         return x
 
 
@@ -541,13 +540,13 @@ class WanModel(nn.Module):
 
         grid_sizes = mx.stack(
             [mx.array(u.shape[1:4], dtype=mx.int32) for u in x])
-        
+
 
         x = [u.reshape(u.shape[0], -1, u.shape[-1]) for u in x]
 
         seq_lens = mx.array([u.shape[1] for u in x], dtype=mx.int32)
         assert seq_lens.max() <= seq_len
-        
+
         # Pad sequences
         x_padded = []
         for u in x:
@@ -637,7 +636,7 @@ class WanModel(nn.Module):
         std = math.sqrt(2.0 / (fan_in + fan_out))
         self.patch_embedding.weight = mx.random.uniform(
             low=-std, high=std, shape=self.patch_embedding.weight.shape)
-        
+
         # Initialize text embedding layers with normal distribution
         text_layers = list(self.text_embedding.layers)
         for i in [0, 2]:  # First and third layers
@@ -645,7 +644,7 @@ class WanModel(nn.Module):
             layer.weight = mx.random.normal(shape=layer.weight.shape) * 0.02
             if hasattr(layer, 'bias') and layer.bias is not None:
                 layer.bias = mx.zeros(layer.bias.shape)
-        
+
         # Initialize time embedding layers
         time_layers = list(self.time_embedding.layers)
         for i in [0, 2]:  # First and third layers
@@ -653,7 +652,7 @@ class WanModel(nn.Module):
             layer.weight = mx.random.normal(shape=layer.weight.shape) * 0.02
             if hasattr(layer, 'bias') and layer.bias is not None:
                 layer.bias = mx.zeros(layer.bias.shape)
-        
+
         # Initialize output head to zeros
         self.head.head.weight = mx.zeros(self.head.head.weight.shape)
         if hasattr(self.head.head, 'bias') and self.head.head.bias is not None:

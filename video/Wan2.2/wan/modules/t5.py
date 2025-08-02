@@ -1,14 +1,12 @@
 # MLX implementation for t5.py
 import logging
 import math
-from typing import Optional, Tuple, List
 
 import mlx.core as mx
 import mlx.nn as nn
-import numpy as np
 from mlx.utils import tree_unflatten
 
-from .tokenizers import HuggingfaceTokenizer
+from ..t5_model_io import sanitize
 
 __all__ = [
     'T5Model',
@@ -90,11 +88,11 @@ class T5Attention(nn.Module):
 
         # compute attention (T5 does not use scaling)
         attn = mx.matmul(q, mx.transpose(k, (0, 1, 3, 2)))  # [B, N, L1, L2]
-        
+
         # add position bias if provided
         if pos_bias is not None:
             attn = attn + pos_bias
-            
+
         # apply mask
         if mask is not None:
             if mask.ndim == 2:
@@ -110,14 +108,14 @@ class T5Attention(nn.Module):
         # softmax and apply attention
         attn = mx.softmax(attn.astype(mx.float32), axis=-1).astype(attn.dtype)
         attn = self.dropout(attn)
-        
+
         # apply attention to values
         x = mx.matmul(attn, v)  # [B, N, L1, C]
-        
+
         # transpose back and reshape
         x = mx.transpose(x, (0, 2, 1, 3))  # [B, L1, N, C]
         x = x.reshape(b, l1, -1)
-        
+
         # output projection
         x = self.o(x)
         x = self.dropout(x)
@@ -237,17 +235,17 @@ class T5RelativeEmbedding(nn.Module):
         positions_q = mx.arange(lq)[:, None]
         positions_k = mx.arange(lk)[None, :]
         rel_pos = positions_k - positions_q
-        
+
         # Apply bucketing
         rel_pos = self._relative_position_bucket(rel_pos)
-        
+
         # Get embeddings
         rel_pos_embeds = self.embedding(rel_pos)
-        
+
         # Reshape to [1, N, Lq, Lk]
         rel_pos_embeds = mx.transpose(rel_pos_embeds, (2, 0, 1))
         rel_pos_embeds = mx.expand_dims(rel_pos_embeds, 0)
-        
+
         return rel_pos_embeds
 
     def _relative_position_bucket(self, rel_pos):
@@ -264,19 +262,19 @@ class T5RelativeEmbedding(nn.Module):
         # embeddings for small and large positions
         max_exact = num_buckets // 2
         is_small = rel_pos < max_exact
-        
+
         # For large positions, use log scale
         rel_pos_large = max_exact + (
             mx.log(mx.array(rel_pos, dtype=mx.float32) / max_exact) /
             math.log(self.max_dist / max_exact) *
             (num_buckets - max_exact)
         ).astype(mx.int32)
-        
+
         rel_pos_large = mx.minimum(rel_pos_large, num_buckets - 1)
-        
+
         # Combine small and large position buckets
         rel_buckets = rel_buckets + mx.where(is_small, rel_pos, rel_pos_large)
-        
+
         return rel_buckets
 
 
@@ -305,7 +303,7 @@ class T5Encoder(nn.Module):
             self.token_embedding = vocab
         else:
             self.token_embedding = nn.Embedding(vocab, dim)
-            
+
         self.pos_embedding = T5RelativeEmbedding(
             num_buckets, num_heads, bidirectional=True) if shared_pos else None
         self.dropout = nn.Dropout(dropout)
@@ -352,7 +350,7 @@ class T5Decoder(nn.Module):
             self.token_embedding = vocab
         else:
             self.token_embedding = nn.Embedding(vocab, dim)
-            
+
         self.pos_embedding = T5RelativeEmbedding(
             num_buckets, num_heads, bidirectional=False) if shared_pos else None
         self.dropout = nn.Dropout(dropout)
@@ -425,10 +423,10 @@ class T5Model(nn.Module):
 
 def init_mlx_weights(module, key):
     """Initialize weights for T5 model components to match PyTorch initialization"""
-    
+
     def normal(key, shape, std=1.0):
         return mx.random.normal(key, shape) * std
-    
+
     if isinstance(module, T5LayerNorm):
         module.weight = mx.ones_like(module.weight)
     elif isinstance(module, nn.Embedding):
@@ -445,7 +443,7 @@ def init_mlx_weights(module, key):
                                   std=module.dim_ffn**-0.5)
     elif isinstance(module, T5Attention):
         # Match PyTorch initialization
-        key1, key2, key3, key4 = random.split(key, 4)
+        key1, key2, key3, key4 = mx.random.split(key, 4)
         module.q.weight = normal(key1, module.q.weight.shape, 
                                 std=(module.dim * module.dim_attn)**-0.5)
         module.k.weight = normal(key2, module.k.weight.shape, 
@@ -464,7 +462,7 @@ def init_mlx_weights(module, key):
         fan_in = module.weight.shape[1]
         bound = 1.0 / math.sqrt(fan_in)
         module.weight = mx.random.uniform(key, module.weight.shape, -bound, bound)
-    
+
     return module
 
 
@@ -493,7 +491,7 @@ def _t5(name,
 
     # init model
     model = model_cls(**kwargs)
-    
+
     # Initialize weights properly
     key = mx.random.key(0)
     model = init_mlx_weights(model, key)
@@ -529,6 +527,7 @@ class T5EncoderModel:
         text_len,
         checkpoint_path=None,
         tokenizer_path=None,
+        dtype=mx.bfloat16
     ):
         self.text_len = text_len
         self.checkpoint_path = checkpoint_path
@@ -538,15 +537,21 @@ class T5EncoderModel:
         model = umt5_xxl(
             encoder_only=True,
             return_tokenizer=False)
-        
+
         if checkpoint_path:
             logging.info(f'loading {checkpoint_path}')
             # Load weights - assuming MLX format checkpoint
             weights = mx.load(checkpoint_path)
+
+            for key, weight in weights.items():
+                if weight.dtype != dtype and mx.issubdtype(weight.dtype, mx.floating):
+                    weights[key] = weight.astype(dtype)
+
+            weights = sanitize(weights)
             model.update(tree_unflatten(list(weights.items())))
-        
+
         self.model = model
-        
+
         # init tokenizer
         from .tokenizers import HuggingfaceTokenizer
         self.tokenizer = HuggingfaceTokenizer(
@@ -558,11 +563,11 @@ class T5EncoderModel:
         # Handle single string input
         if isinstance(texts, str):
             texts = [texts]
-        
+
         # Tokenize texts
         tokenizer_output = self.tokenizer(
             texts, return_mask=True, add_special_tokens=True)
-        
+
         # Handle different tokenizer output formats
         if isinstance(tokenizer_output, tuple):
             ids, mask = tokenizer_output
@@ -570,47 +575,24 @@ class T5EncoderModel:
             # Assuming dict output with 'input_ids' and 'attention_mask'
             ids = tokenizer_output['input_ids']
             mask = tokenizer_output['attention_mask']
-        
+
         # Convert to MLX arrays if not already
         if not isinstance(ids, mx.array):
             ids = mx.array(ids)
         if not isinstance(mask, mx.array):
             mask = mx.array(mask)
-        
+
         # Get sequence lengths
         seq_lens = mx.sum(mask > 0, axis=1)
-        
+
         # Run encoder
         context = self.model(ids, mask)
-        
+
         # Return variable length outputs
         # Convert seq_lens to Python list for indexing
         if seq_lens.ndim == 0:  # Single value
             seq_lens_list = [seq_lens.item()]
         else:
             seq_lens_list = seq_lens.tolist()
-        
+
         return [context[i, :int(seq_lens_list[i])] for i in range(len(texts))]
-
-
-# Utility function to convert PyTorch checkpoint to MLX
-def convert_pytorch_checkpoint(pytorch_path, mlx_path):
-    """Convert PyTorch checkpoint to MLX format"""
-    import torch
-    
-    # Load PyTorch checkpoint
-    pytorch_state = torch.load(pytorch_path, map_location='cpu')
-    
-    # Convert to numpy then to MLX
-    mlx_state = {}
-    for key, value in pytorch_state.items():
-        if isinstance(value, torch.Tensor):
-            # Handle the key mapping if needed
-            mlx_key = key
-            # Convert tensor to MLX array
-            mlx_state[mlx_key] = mx.array(value.numpy())
-    
-    # Save MLX checkpoint
-    mx.save(mlx_path, mlx_state)
-    
-    return mlx_state
