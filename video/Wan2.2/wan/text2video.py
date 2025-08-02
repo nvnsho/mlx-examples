@@ -60,29 +60,35 @@ class WanT2V:
         else:
             self.param_dtype = mx.float32  # default
 
+        if str(config.t5_dtype) == 'torch.bfloat16':
+            self.t5_dtype = mx.bfloat16
+        elif str(config.t5_dtype) == 'torch.float16':
+            self.t5_dtype = mx.float16
+        elif str(config.t5_dtype) == 'torch.float32':
+            self.t5_dtype = mx.float32
+        else:
+            self.t5_dtype = mx.bfloat16  # default
+
         # Initialize T5 text encoder
         print(f"checkpoint_dir is: {checkpoint_dir}")
         t5_checkpoint_path = os.path.join(checkpoint_dir, config.t5_checkpoint)
-        mlx_t5_path = t5_checkpoint_path.replace('.safetensors', '_mlx.safetensors')
-        if not os.path.exists(mlx_t5_path):
+        if not os.path.exists(t5_checkpoint_path):
             # Check if it's a .pth file that needs conversion
             pth_path = t5_checkpoint_path.replace('.safetensors', '.pth')
             if os.path.exists(pth_path):
                 logging.info(f"Converting T5 PyTorch model to safetensors: {pth_path}")
-                from .t5_torch_to_sf import convert_pickle_to_safetensors
-                convert_pickle_to_safetensors(pth_path, t5_checkpoint_path, load_method="weights_only")
-                # Convert torch safetensors to MLX safetensors
-                from .t5_model_io import convert_safetensors_to_mlx_weights
-                convert_safetensors_to_mlx_weights(t5_checkpoint_path, mlx_t5_path, float16=(self.param_dtype == mx.float16))
+                from .model_converter import convert_pickle_to_safetensors
+                convert_pickle_to_safetensors(pth_path, t5_checkpoint_path)
             else:
                 raise FileNotFoundError(f"T5 checkpoint not found: {t5_checkpoint_path} or {pth_path}")
 
-        t5_checkpoint_path = mlx_t5_path  # Use the MLX version
         logging.info(f"Loading T5 text encoder... from {t5_checkpoint_path}")
         self.text_encoder = T5EncoderModel(
             text_len=config.text_len,
             checkpoint_path=t5_checkpoint_path,
-            tokenizer_path=os.path.join(checkpoint_dir, config.t5_tokenizer))
+            tokenizer_path=os.path.join(checkpoint_dir, config.t5_tokenizer),
+            dtype=self.t5_dtype
+        )
 
         # Initialize VAE - with automatic conversion
         vae_path = os.path.join(checkpoint_dir, config.vae_checkpoint)

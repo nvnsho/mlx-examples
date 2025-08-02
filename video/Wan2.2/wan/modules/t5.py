@@ -6,6 +6,8 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_unflatten
 
+from ..t5_model_io import sanitize
+
 __all__ = [
     'T5Model',
     'T5Encoder',
@@ -525,6 +527,7 @@ class T5EncoderModel:
         text_len,
         checkpoint_path=None,
         tokenizer_path=None,
+        dtype=mx.bfloat16
     ):
         self.text_len = text_len
         self.checkpoint_path = checkpoint_path
@@ -539,6 +542,12 @@ class T5EncoderModel:
             logging.info(f'loading {checkpoint_path}')
             # Load weights - assuming MLX format checkpoint
             weights = mx.load(checkpoint_path)
+
+            for key, weight in weights.items():
+                if weight.dtype != dtype and mx.issubdtype(weight.dtype, mx.floating):
+                    weights[key] = weight.astype(dtype)
+
+            weights = sanitize(weights)
             model.update(tree_unflatten(list(weights.items())))
 
         self.model = model
@@ -587,26 +596,3 @@ class T5EncoderModel:
             seq_lens_list = seq_lens.tolist()
 
         return [context[i, :int(seq_lens_list[i])] for i in range(len(texts))]
-
-
-# Utility function to convert PyTorch checkpoint to MLX
-def convert_pytorch_checkpoint(pytorch_path, mlx_path):
-    """Convert PyTorch checkpoint to MLX format"""
-    import torch
-
-    # Load PyTorch checkpoint
-    pytorch_state = torch.load(pytorch_path, map_location='cpu')
-
-    # Convert to numpy then to MLX
-    mlx_state = {}
-    for key, value in pytorch_state.items():
-        if isinstance(value, torch.Tensor):
-            # Handle the key mapping if needed
-            mlx_key = key
-            # Convert tensor to MLX array
-            mlx_state[mlx_key] = mx.array(value.numpy())
-
-    # Save MLX checkpoint
-    mx.save(mlx_path, mlx_state)
-
-    return mlx_state
